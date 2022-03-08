@@ -192,6 +192,8 @@ def train_source(args):
         netF = network.VGGBase(vgg_name=args.net).cuda()
     elif args.net == 'vit':
         netF = network.ViT().cuda()
+    elif args.net == 'swin':
+        pass
     
     ### test model paremet size
     # model=network.ResBase(res_name=args.net)
