@@ -15,6 +15,7 @@ from tqdm import tqdm
 from scipy.spatial.distance import cdist
 from sklearn.metrics import confusion_matrix
 from loss import KnowledgeDistillationLoss
+from networks.swin_transformer import SwinTransformer
 
 
 def op_copy(optimizer):
@@ -140,7 +141,9 @@ def train_target(args):
         netF = network.VGGBase(vgg_name=args.net).cuda()
     elif args.net == 'vit':
         netF = network.ViT().cuda()
-    netB = network.feat_bootleneck(type=args.classifier, feature_dim=netF.in_features,
+    elif args.net == 'swin':
+        netF = SwinTransformer(embed_dim=128, num_classes=2048, depths=[2, 2, 18, 2], num_heads=[4, 8, 16, 32]).cuda()
+    netB = network.feat_bootleneck(type=args.classifier, feature_dim=netF.num_classes,
                                    bottleneck_dim=args.bottleneck).cuda()
     netC = network.feat_classifier(type=args.layer, class_num=args.class_num, bottleneck_dim=args.bottleneck).cuda()
 
@@ -160,7 +163,9 @@ def train_target(args):
         netF_t = network.VGGBase(vgg_name=args.net).cuda()
     elif args.net == 'vit':
         netF_t = network.ViT().cuda()
-    netB_t = network.feat_bootleneck(type=args.classifier, feature_dim=netF.in_features,
+    elif args.net == 'swin':
+        netF_t = SwinTransformer(embed_dim=128, num_classes=2048, depths=[2, 2, 18, 2], num_heads=[4, 8, 16, 32]).cuda()
+    netB_t = network.feat_bootleneck(type=args.classifier, feature_dim=netF.num_classes,
                                    bottleneck_dim=args.bottleneck).cuda()
     ### initial from student
     netF_t.load_state_dict(netF.state_dict())

@@ -310,9 +310,9 @@ def test_target(args):
         netF = network.ResBase(res_name=args.net).cuda()
     elif args.net[0:3] == 'vgg':
         netF = network.VGGBase(vgg_name=args.net).cuda()  
-    elif arg.net == 'vit':
+    elif args.net == 'vit':
         netF = network.ViT().cuda()
-    elif arg.net == 'swin':
+    elif args.net == 'swin':
         netF = netF = SwinTransformer(embed_dim=128, num_classes=2048, depths=[2, 2, 18, 2], num_heads=[4, 8, 16, 32]).cuda()
 
     netB = network.feat_bootleneck(type=args.classifier, feature_dim=netF.num_classes, bottleneck_dim=args.bottleneck).cuda()
