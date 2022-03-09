@@ -1,4 +1,5 @@
 import argparse
+from ast import arg
 import os, sys
 import os.path as osp
 import torchvision
@@ -16,6 +17,7 @@ from loss import CrossEntropyLabelSmooth
 from scipy.spatial.distance import cdist
 from sklearn.metrics import confusion_matrix
 from sklearn.cluster import KMeans
+from networks.swin_transformer import SwinTransformer
 
 def op_copy(optimizer):
     for param_group in optimizer.param_groups:
@@ -183,6 +185,27 @@ def cal_acc_oda(loader, netF, netB, netC):
     return np.mean(acc[:-1]), np.mean(acc), unknown_acc
     # return np.mean(acc), np.mean(acc[:-1])
 
+def load_pretrained(model, pretrained_path=None):
+    if pretrained_path is not None:
+        print("pretrained_path:{}".format(pretrained_path))
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        pretrained_dict = torch.load(pretrained_path, map_location=device)
+        if "model"  not in pretrained_dict:
+            print("---start load pretrained modle by splitting---")
+            pretrained_dict = {k[17:]:v for k,v in pretrained_dict.items()}
+            for k in list(pretrained_dict.keys()):
+                if "output" in k:
+                    print("delete key:{}".format(k))
+                    del pretrained_dict[k]
+            model.load_state_dict(pretrained_dict,strict=False)
+        else:
+            pretrained_dict = pretrained_dict['model']
+            print("---start load pretrained modle of swin encoder---")
+            model.load_state_dict(pretrained_dict, strict=False)
+            model.adjust_head(2048)
+    else:
+        print("none pretrain")
+
 def train_source(args):
     dset_loaders = data_load(args)
     ## set base network
@@ -193,7 +216,9 @@ def train_source(args):
     elif args.net == 'vit':
         netF = network.ViT().cuda()
     elif args.net == 'swin':
-        pass
+        netF = SwinTransformer(embed_dim=128, num_classes=21841, depths=[2, 2, 18, 2], num_heads=[4, 8, 16, 32])
+        load_pretrained(netF, args.pretrained_path)
+        netF = netF.cuda()
     
     ### test model paremet size
     # model=network.ResBase(res_name=args.net)
@@ -203,7 +228,7 @@ def train_source(args):
     # num_params_update = sum([np.prod(p.shape) for p in model.parameters() if p.requires_grad])
     # print("Total number of learning parameters: {}".format(num_params_update))
 
-    netB = network.feat_bootleneck(type=args.classifier, feature_dim=netF.in_features, bottleneck_dim=args.bottleneck).cuda()
+    netB = network.feat_bootleneck(type=args.classifier, feature_dim=netF.num_classes, bottleneck_dim=args.bottleneck).cuda()
     netC = network.feat_classifier(type=args.layer, class_num = args.class_num, bottleneck_dim=args.bottleneck).cuda()
 
     param_group = []
@@ -285,10 +310,12 @@ def test_target(args):
         netF = network.ResBase(res_name=args.net).cuda()
     elif args.net[0:3] == 'vgg':
         netF = network.VGGBase(vgg_name=args.net).cuda()  
-    else:
+    elif arg.net == 'vit':
         netF = network.ViT().cuda()
-        
-    netB = network.feat_bootleneck(type=args.classifier, feature_dim=netF.in_features, bottleneck_dim=args.bottleneck).cuda()
+    elif arg.net == 'swin':
+        netF = netF = SwinTransformer(embed_dim=128, num_classes=2048, depths=[2, 2, 18, 2], num_heads=[4, 8, 16, 32]).cuda()
+
+    netB = network.feat_bootleneck(type=args.classifier, feature_dim=netF.num_classes, bottleneck_dim=args.bottleneck).cuda()
     netC = network.feat_classifier(type=args.layer, class_num = args.class_num, bottleneck_dim=args.bottleneck).cuda()
     
     args.modelpath = args.output_dir_src + '/source_F.pt'   
@@ -324,22 +351,22 @@ def print_args(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='SHOT')
-    parser.add_argument('--gpu_id', type=str, nargs='?', default='0', help="device id to run")
+    parser.add_argument('--gpu_id', type=str, nargs='?', default='5', help="device id to run")
     parser.add_argument('--s', type=int, default=0, help="source")
     parser.add_argument('--t', type=int, default=1, help="target")
-    parser.add_argument('--max_epoch', type=int, default=20, help="max iterations")
+    parser.add_argument('--max_epoch', type=int, default=100, help="max iterations")
     parser.add_argument('--batch_size', type=int, default=64, help="batch_size")
     parser.add_argument('--worker', type=int, default=4, help="number of workers")
-    parser.add_argument('--dset', type=str, default='office-home', choices=['VISDA-C', 'office', 'office-home', 'office-caltech'])
+    parser.add_argument('--dset', type=str, default='office', choices=['VISDA-C', 'office', 'office-home', 'office-caltech'])
     parser.add_argument('--lr', type=float, default=1e-2, help="learning rate")
-    parser.add_argument('--net', type=str, default='vit', help="vgg16, resnet50, resnet101")
+    parser.add_argument('--net', type=str, default='swin', help="vgg16, resnet50, resnet101")
     parser.add_argument('--seed', type=int, default=2020, help="random seed")
     parser.add_argument('--bottleneck', type=int, default=256)
     parser.add_argument('--epsilon', type=float, default=1e-5)
     parser.add_argument('--layer', type=str, default="wn", choices=["linear", "wn"])
     parser.add_argument('--classifier', type=str, default="bn", choices=["ori", "bn"])
     parser.add_argument('--smooth', type=float, default=0.1)   
-    parser.add_argument('--output', type=str, default='san')
+    parser.add_argument('--output', type=str, default='ckps/source/')
     parser.add_argument('--da', type=str, default='uda', choices=['uda', 'pda', 'oda'])
     parser.add_argument('--trte', type=str, default='val', choices=['full', 'val'])
     parser.add_argument('--bsp', type=bool, default=False)
@@ -384,6 +411,7 @@ if __name__ == "__main__":
 
     args.output_dir_src = osp.join(args.output, args.da, args.dset, names[args.s][0].upper())
     args.name_src = names[args.s][0].upper()
+    args.pretrained_path = r'/home/wlzhong/project/sslda/model/swin/swin_base_patch4_window7_224_22k.pth'
     if not osp.exists(args.output_dir_src):
         os.system('mkdir -p ' + args.output_dir_src)
     if not osp.exists(args.output_dir_src):

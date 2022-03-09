@@ -67,7 +67,7 @@ class BasicLayers(nn.Module):
                                 mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale, drop=drop, 
                                 attn_drop=attn_drop, drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
                                 norm_layer=norm_layer)
-        ] for i in range(depth))
+        for i in range(depth)])
 
         if downsample is not None:
             self.downsample = downsample(input_resolution, dim=dim, norm_layer=norm_layer)
@@ -118,17 +118,17 @@ class SwinTransformerBlock(nn.Module):
         if min(self.input_resolution) < window_size:
             self.shift_size = 0
             self.window_size = min(self.input_resolution)
-        assert 0 <= self.shift_size < self.window_size
+        assert 0 <= self.shift_size < self.window_size, "shift_size must in 0-window_size"
 
         self.norm1 = norm_layer(dim)
         self.attn = WindowAttention(
-            dim, window_size=window_size, num_heads=num_heads, qkv_bias=qkv_bias,
+            dim, window_size=to_2tuple(self.window_size), num_heads=num_heads, qkv_bias=qkv_bias,
             qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop
         )
         self.drop_path = DropPath(drop_path) if drop_path > 0 else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, out_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
         if self.shift_size > 0:
             H, W = self.input_resolution
@@ -147,7 +147,7 @@ class SwinTransformerBlock(nn.Module):
                     cnt += 1
 
             mask_windows = window_partition(img_mask, self.window_size)
-            mask_windows = mask_windows.view(-1, self.window_size, self.window_size)
+            mask_windows = mask_windows.view(-1, self.window_size * self.window_size)
             attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
             attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.)).masked_fill(attn_mask == 0, float(0.))
         else:
@@ -170,7 +170,7 @@ class SwinTransformerBlock(nn.Module):
             shift_x  =x
 
         x_windows = window_partition(shift_x, self.window_size)
-        x_windows = x_windows.view(-1, self.window_size*self.window_size. C)
+        x_windows = x_windows.view(-1, self.window_size*self.window_size, C)
 
         attn_windows = self.attn(x_windows, mask=self.attn_mask)
         shift_x = window_reverse(attn_windows, self.window_size, H, W)
@@ -226,7 +226,7 @@ class WindowAttention(nn.Module):
         q, k, v = qkv[0], qkv[1], qkv[2]
 
         q = q * self.scale
-        attn = (q @ k.tranpose(-2, -1))
+        attn = (q @ k.transpose(-2, -1))
 
         relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
             self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1
@@ -291,8 +291,8 @@ class SwinTransformer(nn.Module):
         for i_layer in range(self.num_layers):
             layer = BasicLayers(
                 dim=int(embed_dim * 2 ** i_layer),
-                input_resolution=(self.patch_resolution[0] // 2 ** i_layer,
-                                self.patch_resolution[1] // 2 * i_layer),
+                input_resolution=(self.patch_resolution[0] // (2 ** i_layer),
+                                self.patch_resolution[1] // (2 ** i_layer)),
                 depth=depths[i_layer],
                 num_heads=num_heads[i_layer],
                 window_size=window_size,
@@ -312,6 +312,10 @@ class SwinTransformer(nn.Module):
         self.head = nn.Linear(self.num_features, self.num_classes) if num_classes > 0 else nn.Identity()
 
         self.apply(self._init_weights)
+
+    def adjust_head(self, num_classes):
+        self.num_classes = num_classes
+        self.head = nn.Linear(self.num_features, num_classes)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
